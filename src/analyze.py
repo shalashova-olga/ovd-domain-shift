@@ -9,7 +9,8 @@
     fn_breakdown.csv           пропуски по классу, размеру объекта и причине
     class_confusions.csv       какие классы с какими путаются
     vlm_answers.md             сырые ответы VLM: невалидные, обрезанные, примеры
-    plots/*.png                тепловая карта mAP, перенос порога, диаграммы надёжности
+    plots/*.png                тепловая карта mAP, перенос порога, диаграммы надёжности,
+                               zero-shot против few-shot и LoRA
     gallery/<модель>/<домен>/  кадры с наибольшим числом ошибок, разметка ошибок на кадре
     compare/<домен>_*.jpg      самые трудные кадры домена: разметка и все модели рядом
 
@@ -301,6 +302,42 @@ def plot_reliability(details: dict, models, domains, path: Path) -> None:
     plt.close(fig)
 
 
+def plot_adaptation(adapt: pd.DataFrame, metrics: pd.DataFrame, domains, path: Path) -> None:
+    """mAP@50 исходной модели и её режимов адаптации, по панели на модель."""
+    bases = list(dict.fromkeys(adapt["base"]))
+    cols = min(len(bases), 3)
+    rows = -(-len(bases) // cols)
+    # Шкала у каждой панели своя: mAP у Qwen на порядок ниже, чем у детекторов,
+    # и на общей шкале его столбцы не видны
+    fig, axes = plt.subplots(rows, cols, figsize=(4.2 * cols, 3.2 * rows + 0.7), dpi=150,
+                             squeeze=False)
+    fig.patch.set_facecolor(SURFACE)
+    m = metrics.set_index(["model", "domain"])["mAP@50"]
+    width = 0.8 / len(domains)
+    for ax, base in zip(axes.flat, bases):
+        _style(ax)
+        ax.grid(axis="x", visible=False)
+        variants = [base] + list(dict.fromkeys(adapt[adapt.base == base]["model"]))
+        names = ["zero-shot"] + [v[len(base) + 1:] if v.startswith(base + "-") else v
+                                 for v in variants[1:]]
+        for j, (slot, dom) in enumerate(zip(DOMAIN_SLOTS, domains)):
+            vals = [m.get((v, dom), np.nan) for v in variants]
+            ax.bar(np.arange(len(variants)) + (j - (len(domains) - 1) / 2) * width, vals,
+                   width * 0.92, color=slot, label=dom)
+        ax.set_xticks(range(len(variants)), names)
+        ax.set_title(base, fontsize=9, color=INK, loc="left")
+    for ax in list(axes.flat)[len(bases):]:
+        ax.axis("off")
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(domains), frameon=False,
+               fontsize=9, labelcolor=INK_2, bbox_to_anchor=(0.5, 0.0))
+    fig.suptitle("mAP@50: zero-shot, few-shot (fs — число примеров) и LoRA",
+                 x=0.01, ha="left", color=INK, fontsize=11)
+    fig.tight_layout(rect=(0, 0.07, 1, 0.96))
+    fig.savefig(path, facecolor=SURFACE)
+    plt.close(fig)
+
+
 # --------------------------------------------------------------------------- #
 #                               Ответы VLM                                    #
 # --------------------------------------------------------------------------- #
@@ -443,6 +480,18 @@ def write_summary(out: Path, tables: Path, cfg: dict, err: pd.DataFrame,
               "Мелкие — меньше 32² пикселей, крупные — больше 96².", "",
               md_table(sz, index=True, digits=2), ""]
 
+    ad = _read(tables / "adaptation.csv")
+    if ad is not None and len(ad):
+        cols = ["model", "domain", "mAP@50_base", "mAP@50", "delta_mAP50", "significant",
+                "precision_transferred_base", "precision_transferred",
+                "invalid_rate_base", "invalid_rate"]
+        L += ["## Zero-shot, few-shot и LoRA", "",
+              "Примеры few-shot и обучающие кадры LoRA — с ясного дня вне теста, "
+              "целевые домены при адаптации не используются. `significant` — интервалы "
+              "mAP@50 режима и исходной модели не пересекаются.", "",
+              img("adaptation.png"), "",
+              md_table(ad[[c for c in cols if c in ad.columns]]), ""]
+
     ps = _read(tables / "prompt_sensitivity_summary.csv")
     if ps is not None:
         L += ["## Чувствительность к формулировке запроса", "",
@@ -492,6 +541,10 @@ def main() -> None:
 
     datasets = load_domains(cfg, subset)
     domains = [d for d in cfg["domains"] if d in datasets]
+    # Сетки трудных кадров и диаграммы надёжности — только по исходным
+    # моделям, иначе с режимами адаптации в них по 18 картинок; режимы
+    # сравниваются с исходными моделями отдельным графиком
+    zero_shot = [k for k, v in cfg["models"].items() if not v.get("base")]
 
     err_rows, fn_rows, conf_rows = [], [], []
     answers: dict[tuple[str, str], list[dict]] = {}
@@ -574,7 +627,7 @@ def main() -> None:
                 continue
             img = Image.open(s.image_path).convert("RGB")
             tiles = [draw_ground_truth(img, s, datasets[dom].classes, 640)]
-            for model in cfg["models"]:
+            for model in zero_shot:
                 info = per_model_images.get((model, dom))
                 if info and img_id in info["by_id"]:
                     _, pr, e = info["by_id"][img_id]
@@ -599,8 +652,12 @@ def main() -> None:
     details_path = tables / "details.json"
     if details_path.exists():
         details = json.loads(details_path.read_text(encoding="utf-8"))
-        models = [mk for mk in cfg["models"] if any(k.startswith(mk + "__") for k in details)]
+        models = [mk for mk in zero_shot if any(k.startswith(mk + "__") for k in details)]
         plot_reliability(details, models, domains, out / "plots" / "reliability.png")
+
+    ad = _read(tables / "adaptation.csv")
+    if m is not None and ad is not None and len(ad):
+        plot_adaptation(ad, m, domains, out / "plots" / "adaptation.png")
 
     write_summary(out, tables, cfg, err, conf, fn, vlm, gallery_links, compare_links,
                   {d: len(ds) for d, ds in datasets.items()}, subset)

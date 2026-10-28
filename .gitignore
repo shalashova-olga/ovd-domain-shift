@@ -1,6 +1,7 @@
 cookies*.txt
 /data/
 /logs/
+/checkpoints/
 *.partial
 *.pt
 *.pyc

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Полный прогон: проверка данных, короткая проверка каждой модели, инференс, метрики.
+# Полный прогон: проверка данных, обучение LoRA, короткая проверка каждой
+# модели, инференс, метрики.
 #
 # Запускать внутри tmux, чтобы прогон пережил отключение от сервера:
 #     tmux new -s ovd
@@ -27,6 +28,7 @@ echo "Журнал: $LOG"
 echo "Конфиг: $CONFIG"
 
 python scripts/make_split.py --config "$CONFIG" || exit 1          # если разбиение уже есть — не трогает
+python scripts/make_adapt_split.py --config "$CONFIG" || exit 1    # кадры для few-shot и LoRA, тоже один раз
 python scripts/check_data.py --config "$CONFIG" || { echo "Данные не готовы — прогон остановлен"; exit 1; }
 python scripts/data_passport.py --config "$CONFIG"
 
@@ -35,8 +37,28 @@ python scripts/data_passport.py --config "$CONFIG"
 # снаружи, например только детекторы, пока подбирается промпт Qwen:
 #     MODELS="yolo11l-coco grounding-dino-base" bash scripts/run_all.sh
 DETECTORS="yolo11l-coco yolo-world-l owlvit-base owlv2-base grounding-dino-tiny grounding-dino-base owlv2-large"
-MODELS="${MODELS:-$DETECTORS qwen2.5-vl-7b}"
+# Режимы адаптации (few-shot, LoRA) — все записи конфига с base, в порядке конфига
+ADAPTED=$(python -c "import yaml,sys; m=yaml.safe_load(open(sys.argv[1]))['models']; print(' '.join(k for k,v in m.items() if v.get('base')))" "$CONFIG")
+MODELS="${MODELS:-$DETECTORS qwen2.5-vl-7b $ADAPTED}"
 echo "Модели: $MODELS"
+
+# Обучение LoRA до инференса. Сначала пробный цикл на 4 кадрах (минута):
+# если обучение не запускается, модель пропускается, а не роняет прогон.
+# Уже обученная модель не переобучается.
+FAILED=""
+for m in $MODELS; do
+    MODE=$(python -c "import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))['models'].get(sys.argv[2], {}).get('mode',''))" "$CONFIG" "$m")
+    [ "$MODE" = "lora" ] || continue
+    echo "== Обучение LoRA: $m: $(date +%H:%M:%S) =="
+    if python -m src.train_lora --config "$CONFIG" --model "$m" --limit 4 --epochs 1 \
+            --out "checkpoints/_check/$m" --overwrite \
+       && python -m src.train_lora --config "$CONFIG" --model "$m"; then
+        :
+    else
+        echo "[!] LoRA $m не обучилась — пропускаю её"
+        FAILED="$FAILED $m"
+    fi
+done
 
 # Модель, которая не запускается, исключается из прогона, а не останавливает
 # его: остальные досчитаются, а о проблеме будет запись в журнале.
@@ -45,8 +67,8 @@ echo "Модели: $MODELS"
 SMOKE_DOMAIN=$(python -c "import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))['source_domain'])" "$CONFIG")
 echo "== Проверка каждой модели на 3 кадрах ($SMOKE_DOMAIN) =="
 OK_MODELS=""
-FAILED=""
 for m in $MODELS; do
+    case " $FAILED " in *" $m "*) continue ;; esac
     if python -m src.run_inference --config "$CONFIG" --model "$m" --domain "$SMOKE_DOMAIN" --limit 3 --overwrite; then
         OK_MODELS="$OK_MODELS $m"
     else
@@ -73,7 +95,7 @@ python -m src.analyze --config "$CONFIG"
 STAMP=$(date +%Y%m%d_%H%M)
 PRED_DIR=$(python -c "import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))['output_dir'])" "$CONFIG")
 # В архив попадает только то, что реально посчитано
-PARTS=$(for p in results/tables results/analysis results/data_passport.md logs configs docs; do [ -e "$p" ] && echo "$p"; done)
+PARTS=$(for p in results/tables results/analysis results/data_passport.md logs configs docs checkpoints/lora/*/train_log.json; do [ -e "$p" ] && echo "$p"; done)
 tar -czf "results_${STAMP}_analysis.tar.gz" $PARTS
 [ -d "$PRED_DIR" ] && tar -czf "results_${STAMP}_predictions.tar.gz" --exclude="_debug" "$PRED_DIR"
 echo

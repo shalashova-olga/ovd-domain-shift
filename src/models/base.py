@@ -133,16 +133,24 @@ class BaseDetector(ABC):
     license: str = "unknown"
     #: открытый словарь или фиксированный набор классов
     open_vocabulary: bool = True
+    #: что использовано при адаптации (примеры few-shot, веса LoRA) — пишется в журнал
+    adaptation_meta: dict | None = None
 
     def __init__(
         self,
         class_names: list[str],
         device: str = "cuda",
         box_threshold: float = 0.05,
+        max_detections: int | None = None,
         **kwargs: Any,
     ) -> None:
         self.class_names = class_names
         self.device = device
+        # Предел боксов на кадр по скору, как maxDets в COCO. Нужен режимам,
+        # где скоры смещены вверх и выше box_threshold остаются тысячи боксов
+        # (few-shot OWL): хвост ниже первых сотен на mAP не влияет, а журналы
+        # без предела вырастают в десятки раз. У zero-shot моделей не задан.
+        self.max_detections = max_detections
         # Порог намеренно низкий: отсечение по confidence — предмет исследования,
         # поэтому сырые предсказания сохраняются, а пороги подбираются на этапе
         # анализа. Высокий порог на инференсе уничтожил бы кривые precision-recall
@@ -200,6 +208,10 @@ class BaseDetector(ABC):
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         dets, validity = self._sanitize(boxes, scores, labels, image.size, raw)
+        if self.max_detections and len(dets) > self.max_detections:
+            top = np.argsort(-dets.scores, kind="stable")[: self.max_detections]
+            dets = Detections(dets.boxes[top], dets.scores[top], dets.labels[top], dets.raw)
+            validity.n_kept = len(dets)
         return dets, validity, latency_ms, peak_vram
 
     # ------------------------------ внутреннее ----------------------------- #

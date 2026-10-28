@@ -244,6 +244,45 @@ def prompt_sensitivity(
     print(summary[["range", "mAP50_ci_width", "best_variant"]].to_string())
 
 
+def adaptation_table(cfg: dict, df: pd.DataFrame, transfer: pd.DataFrame) -> pd.DataFrame:
+    """Режимы адаптации рядом с исходной моделью: что дали few-shot и LoRA.
+
+    Для каждого режима и домена — mAP@50 с интервалом, прирост к исходной
+    модели и precision при пороге, перенесённом с источника. Прирост считается
+    значимым, только если интервалы режима и исходной модели не пересекаются:
+    обе оценки получены на одних и тех же кадрах, но интервалы независимы,
+    поэтому это осторожная проверка.
+    """
+    rows = []
+    by = df.set_index(["model", "domain"])
+    tr = transfer.set_index(["model", "domain"]) if len(transfer) else None
+    for key, mcfg in cfg["models"].items():
+        base = mcfg.get("base")
+        if not base:
+            continue
+        for domain in cfg["domains"]:
+            if (key, domain) not in by.index or (base, domain) not in by.index:
+                continue
+            a, b = by.loc[(key, domain)], by.loc[(base, domain)]
+            row = {
+                "model": key, "base": base, "mode": mcfg["mode"],
+                "shots": mcfg.get("shots"), "domain": domain,
+                "mAP@50_base": b["mAP@50"], "mAP@50": a["mAP@50"],
+                "delta_mAP50": a["mAP@50"] - b["mAP@50"],
+                "significant": bool(a["mAP50_ci_low"] > b["mAP50_ci_high"]
+                                    or a["mAP50_ci_high"] < b["mAP50_ci_low"]),
+                "recall_at_P90_base": b["recall_at_P90"], "recall_at_P90": a["recall_at_P90"],
+                "D-ECE_base": b["D-ECE"], "D-ECE": a["D-ECE"],
+                "invalid_rate_base": b["invalid_rate"], "invalid_rate": a["invalid_rate"],
+                "latency_p95_ms_base": b["latency_p95_ms"], "latency_p95_ms": a["latency_p95_ms"],
+            }
+            if tr is not None and (key, domain) in tr.index and (base, domain) in tr.index:
+                row["precision_transferred_base"] = tr.loc[(base, domain), "precision_transferred"]
+                row["precision_transferred"] = tr.loc[(key, domain), "precision_transferred"]
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Расчёт метрик и сборка таблиц")
     ap.add_argument("--config", default="configs/experiment.yaml")
@@ -381,9 +420,20 @@ def main() -> None:
         "latency_p95_ms": "mean", "peak_vram_mb": "max",
     })
     scored = composite_score(target, ev["composite_weights"], ev["gates"])
+    # Режимы адаптации участвуют в выборе наравне с исходными моделями:
+    # правило выбирает лучшую модель или способ её применения
+    scored.insert(0, "mode", [cfg["models"][k].get("mode", "zero-shot") for k in scored.index])
     scored.sort_values("composite_score", ascending=False).to_csv(
         out_dir / "composite_ranking.csv", encoding="utf-8"
     )
+
+    # ---- режимы адаптации против исходных моделей ---- #
+    adapt = adaptation_table(cfg, df, pd.DataFrame(transfer))
+    if len(adapt):
+        adapt.to_csv(out_dir / "adaptation.csv", index=False, encoding="utf-8")
+        print("\nАдаптация (прирост mAP@50 к исходной модели):")
+        print(adapt.pivot(index="model", columns="domain", values="delta_mAP50")
+              .round(3).to_string())
 
     with open(out_dir / "details.json", "w", encoding="utf-8") as f:
         json.dump(details, f, ensure_ascii=False, indent=2)

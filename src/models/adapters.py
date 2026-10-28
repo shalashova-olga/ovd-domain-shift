@@ -23,6 +23,17 @@ from PIL import Image
 from .base import BaseDetector
 
 
+def merge_lora(model, path: str):
+    """Подгрузить обученные добавки LoRA и влить их в веса модели.
+
+    После слияния модель устроена так же, как исходная, поэтому задержка и
+    память сравнимы с zero-shot без поправки на обвязку PEFT.
+    """
+    from peft import PeftModel
+
+    return PeftModel.from_pretrained(model, path).merge_and_unload()
+
+
 # --------------------------------------------------------------------------- #
 #                              Grounding DINO                                 #
 # --------------------------------------------------------------------------- #
@@ -87,17 +98,22 @@ class GroundingDINOAdapter(BaseDetector):
     license = "Apache-2.0"
     open_vocabulary = True
 
-    def _load(self, checkpoint: str = "IDEA-Research/grounding-dino-base", **kw: Any) -> None:
+    def _load(
+        self,
+        checkpoint: str = "IDEA-Research/grounding-dino-base",
+        lora: str | None = None,
+        **kw: Any,
+    ) -> None:
         import torch
         from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
         self.checkpoint = checkpoint
         self.processor = AutoProcessor.from_pretrained(checkpoint)
-        self.model = (
-            AutoModelForZeroShotObjectDetection.from_pretrained(checkpoint)
-            .to(self.device)
-            .eval()
-        )
+        model = AutoModelForZeroShotObjectDetection.from_pretrained(checkpoint)
+        if lora:
+            model = merge_lora(model, lora)
+            self.adaptation_meta = {"lora": lora}
+        self.model = model.to(self.device).eval()
         self._torch = torch
 
     def _predict(self, image: Image.Image, prompts: list[str]):
@@ -143,7 +159,13 @@ class OWLv2Adapter(BaseDetector):
     license = "Apache-2.0"
     open_vocabulary = True
 
-    def _load(self, checkpoint: str = "google/owlv2-base-patch16-ensemble", **kw: Any) -> None:
+    def _load(
+        self,
+        checkpoint: str = "google/owlv2-base-patch16-ensemble",
+        shots: dict[int, list[dict]] | None = None,
+        shot_mix: float = 0.5,
+        **kw: Any,
+    ) -> None:
         import torch
         from transformers import Owlv2ForObjectDetection, Owlv2Processor
 
@@ -151,17 +173,24 @@ class OWLv2Adapter(BaseDetector):
         self.processor = Owlv2Processor.from_pretrained(checkpoint)
         self.model = Owlv2ForObjectDetection.from_pretrained(checkpoint).to(self.device).eval()
         self._torch = torch
+        self._init_shots(shots, shot_mix)
 
     def _predict(self, image: Image.Image, prompts: list[str]):
+        if self.shots:
+            return self._predict_with_queries(image, self._query_embeds(prompts))
+
         torch = self._torch
         inputs = self.processor(text=[prompts], images=image, return_tensors="pt").to(self.device)
         with torch.no_grad():
             outputs = self.model(**inputs)
+        return self._postprocess(outputs, image)
 
+    def _postprocess(self, outputs, image: Image.Image):
         # OWLv2 дополняет кадр до квадрата, и боксы нормированы на длинную
         # сторону. Начиная с transformers 4.49 постпроцессор учитывает это сам,
         # поэтому передаётся исходный (h, w). В более ранних версиях здесь
         # нужен был (max(h, w), max(h, w)), иначе боксы сжимались по вертикали.
+        torch = self._torch
         target_sizes = torch.tensor([(image.height, image.width)], device=self.device)
         results = self.processor.post_process_grounded_object_detection(
             outputs=outputs, target_sizes=target_sizes, threshold=self.box_threshold
@@ -171,6 +200,113 @@ class OWLv2Adapter(BaseDetector):
         scores = results["scores"].cpu().numpy()
         labels = results["labels"].cpu().numpy().astype(np.int32)
         return boxes, scores, labels, None
+
+    # ------------------------------ few-shot ------------------------------- #
+    #
+    # Запрос класса у OWL — вектор, с которым сравнивается каждый бокс кадра.
+    # Обычно это вектор текста; вместо него можно взять вектор, который модель
+    # строит для бокса на кадре-образце (image-conditioned detection из статьи
+    # OWL-ViT). Штатный image_guided_detection берёт один образец без указания,
+    # где объект, поэтому образцы здесь кодируются вручную: из боксов модели на
+    # кадре-образце выбирается совпадающий с размеченным, а векторы образцов
+    # одного класса усредняются. Остальная обработка — штатная, через тот же
+    # постпроцессор, что и в zero-shot.
+
+    def _init_shots(self, shots: dict[int, list[dict]] | None, shot_mix: float) -> None:
+        self.shots = {c: v for c, v in (shots or {}).items() if v}
+        self.shot_mix = shot_mix
+        self._query_cache: tuple[tuple[str, ...], Any] | None = None
+        if self.shots:
+            self.adaptation_meta = {
+                "shot_mix": shot_mix,
+                "shots": {self.class_names[c]: [s["image_id"] for s in v]
+                          for c, v in self.shots.items()},
+            }
+
+    def _image_features(self, image: Image.Image):
+        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        feature_map = self.model.image_embedder(pixel_values=inputs["pixel_values"])[0]
+        b, h, w, d = feature_map.shape
+        return feature_map, feature_map.reshape(b, h * w, d)
+
+    def _box_scale(self, image: Image.Image) -> np.ndarray:
+        """Множители «доли → пиксели» постпроцессора для кадра этого размера.
+
+        Определяются через сам постпроцессор, чтобы размеченный бокс переводился
+        в координаты модели ровно обратным ему преобразованием: у OWLv2 кадр
+        дополняется до квадрата, у OWL-ViT растягивается, и это разное в разных
+        версиях transformers.
+        """
+        from types import SimpleNamespace
+
+        torch = self._torch
+        probe = SimpleNamespace(
+            logits=torch.full((1, 1, 1), 10.0),
+            pred_boxes=torch.tensor([[[0.5, 0.5, 1.0, 1.0]]]),
+        )
+        res = self.processor.post_process_grounded_object_detection(
+            outputs=probe, target_sizes=torch.tensor([(image.height, image.width)]), threshold=0.0
+        )[0]
+        x1, y1, x2, y2 = res["boxes"][0].tolist()
+        return np.array([x2 - x1, y2 - y1, x2 - x1, y2 - y1], dtype=np.float32)
+
+    def _shot_embedding(self, shot: dict):
+        """Вектор образца: вектор бокса модели, лучше всего совпадающего с размеченным."""
+        from src.eval.detection_metrics import box_iou
+
+        torch = self._torch
+        image = shot["image"]
+        feature_map, feats = self._image_features(image)
+        _, class_embeds = self.model.class_predictor(feats)
+        pred = self.model.box_predictor(feats, feature_map)[0].float().cpu().numpy()
+        pred_xyxy = np.concatenate([pred[:, :2] - pred[:, 2:] / 2, pred[:, :2] + pred[:, 2:] / 2], 1)
+        gt = np.asarray(shot["box"], dtype=np.float32)[None] / self._box_scale(image)
+        iou = box_iou(gt, pred_xyxy)[0]
+        best = int(iou.argmax())
+        emb = class_embeds[0, best]
+        return emb / (emb.norm() + 1e-6), float(iou[best])
+
+    def _query_embeds(self, prompts: list[str]):
+        """(C, D) векторы запросов: текст, образцы или их смесь — один раз на словарь."""
+        torch = self._torch
+        key = tuple(prompts)
+        if self._query_cache and self._query_cache[0] == key:
+            return self._query_cache[1]
+
+        with torch.no_grad():
+            # Векторы текста — из штатного прохода, кадр на них не влияет
+            blank = Image.new("RGB", (64, 64))
+            inputs = self.processor(text=[prompts], images=blank, return_tensors="pt").to(self.device)
+            text = self.model(**inputs).text_embeds[0]
+            text = text / (text.norm(dim=-1, keepdim=True) + 1e-6)
+
+            queries, ious = [], {}
+            for c in range(len(prompts)):
+                if c not in self.shots or self.shot_mix == 0:
+                    queries.append(text[c])
+                    continue
+                embs = [self._shot_embedding(s) for s in self.shots[c]]
+                ious[self.class_names[c]] = [round(i, 3) for _, i in embs]
+                img = torch.stack([e for e, _ in embs]).mean(0)
+                img = img / (img.norm() + 1e-6)
+                q = (1 - self.shot_mix) * text[c] + self.shot_mix * img
+                queries.append(q / (q.norm() + 1e-6))
+        if self.adaptation_meta is not None:
+            self.adaptation_meta["shot_iou"] = ious
+        out = torch.stack(queries)
+        self._query_cache = (key, out)
+        return out
+
+    def _predict_with_queries(self, image: Image.Image, queries):
+        from types import SimpleNamespace
+
+        torch = self._torch
+        with torch.no_grad():
+            feature_map, feats = self._image_features(image)
+            mask = torch.ones(1, len(queries), dtype=torch.bool, device=self.device)
+            logits, _ = self.model.class_predictor(feats, queries[None], mask)
+            pred_boxes = self.model.box_predictor(feats, feature_map)
+        return self._postprocess(SimpleNamespace(logits=logits, pred_boxes=pred_boxes), image)
 
 
 class OWLViTAdapter(OWLv2Adapter):
@@ -184,7 +320,13 @@ class OWLViTAdapter(OWLv2Adapter):
 
     name = "owlvit"
 
-    def _load(self, checkpoint: str = "google/owlvit-base-patch32", **kw: Any) -> None:
+    def _load(
+        self,
+        checkpoint: str = "google/owlvit-base-patch32",
+        shots: dict[int, list[dict]] | None = None,
+        shot_mix: float = 0.5,
+        **kw: Any,
+    ) -> None:
         import torch
         from transformers import OwlViTForObjectDetection, OwlViTProcessor
 
@@ -192,6 +334,7 @@ class OWLViTAdapter(OWLv2Adapter):
         self.processor = OwlViTProcessor.from_pretrained(checkpoint)
         self.model = OwlViTForObjectDetection.from_pretrained(checkpoint).to(self.device).eval()
         self._torch = torch
+        self._init_shots(shots, shot_mix)
 
 
 # --------------------------------------------------------------------------- #
@@ -223,6 +366,11 @@ class YOLOWorldAdapter(BaseDetector):
         # поэтому вызывается только при смене словаря. Иначе она попала бы
         # в замер latency и исказила сравнение со статическими детекторами.
         if self._prompt_cache != prompts:
+            # Закэшированный CLIP помнит устройство первого вызова (CPU), а predict
+            # уже перенёс его веса на GPU — повторный set_classes падает на смешении
+            # устройств. Сброс заставляет собрать CLIP на текущем устройстве.
+            if getattr(self.model.model, "clip_model", None) is not None:
+                self.model.model.clip_model = None
             self.model.set_classes(prompts)
             self._prompt_cache = list(prompts)
 
@@ -242,6 +390,47 @@ class YOLOWorldAdapter(BaseDetector):
 # --------------------------------------------------------------------------- #
 #                         VLM с grounding (Qwen2.5-VL)                        #
 # --------------------------------------------------------------------------- #
+
+def grid_scale(processor, grid_row, image: Image.Image) -> tuple[float, float]:
+    """Множители «координаты Qwen → пиксели кадра» по строке image_grid_thw.
+
+    Сетка задана в патчах до слияния, поэтому размер входа — число патчей,
+    умноженное на размер патча.
+    """
+    patch = getattr(processor.image_processor, "patch_size", 14)
+    _, gh, gw = (int(v) for v in grid_row)
+    return image.width / (gw * patch), image.height / (gh * patch)
+
+
+def qwen_input_scale(processor, image: Image.Image) -> tuple[float, float]:
+    """Те же множители для отдельного кадра — примера few-shot или обучающего."""
+    grid = processor.image_processor(images=[image], return_tensors="pt")["image_grid_thw"]
+    return grid_scale(processor, grid[0], image)
+
+
+def qwen_answer(boxes: np.ndarray, labels: np.ndarray, prompts: list[str],
+                scale: tuple[float, float]) -> str:
+    """Правильный ответ в формате инструкции — для примеров few-shot и обучения LoRA.
+
+    Координаты переводятся в сетку входа Qwen, как в его собственных ответах.
+    Объекты перечисляются сверху вниз и слева направо: устойчивый порядок
+    легче воспроизвести, чем случайный. Уверенность размеченного объекта — 1.0:
+    другого честного значения у разметки нет.
+    """
+    import json
+
+    sx, sy = scale
+    order = sorted(range(len(boxes)), key=lambda i: (round(float(boxes[i][1])), float(boxes[i][0])))
+    items = []
+    for i in order:
+        x1, y1, x2, y2 = boxes[i]
+        items.append({
+            "bbox_2d": [round(x1 / sx), round(y1 / sy), round(x2 / sx), round(y2 / sy)],
+            "label": prompts[int(labels[i])],
+            "confidence": 1.0,
+        })
+    return json.dumps(items, ensure_ascii=False)
+
 
 class QwenVLAdapter(BaseDetector):
     """Qwen2.5-VL как детектор через структурированный текстовый ответ.
@@ -274,6 +463,8 @@ class QwenVLAdapter(BaseDetector):
         self,
         checkpoint: str = "Qwen/Qwen2.5-VL-7B-Instruct",
         max_new_tokens: int = 2048,
+        shots: list[dict] | None = None,
+        lora: str | None = None,
         **kw: Any,
     ) -> None:
         import torch
@@ -282,30 +473,47 @@ class QwenVLAdapter(BaseDetector):
         self.checkpoint = checkpoint
         self.max_new_tokens = max_new_tokens
         self.processor = AutoProcessor.from_pretrained(checkpoint)
-        self.model = (
-            Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                checkpoint, torch_dtype=torch.bfloat16, device_map=self.device
-            )
-            .eval()
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            checkpoint, torch_dtype=torch.bfloat16, device_map=self.device
         )
+        if lora:
+            model = merge_lora(model, lora)
+            self.adaptation_meta = {"lora": lora}
+        self.model = model.eval()
         self._torch = torch
+        self.shots = shots or []
+        if self.shots:
+            self.adaptation_meta = {"shots": [s["image_id"] for s in self.shots]}
+
+    @classmethod
+    def user_turn(cls, image: Image.Image, prompts: list[str]) -> dict:
+        """Сообщение пользователя: кадр и инструкция. Одно и то же в zero-shot,
+        в примерах few-shot и при обучении LoRA."""
+        return {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": cls.PROMPT_TEMPLATE.format(classes=", ".join(prompts))},
+            ],
+        }
 
     def _predict(self, image: Image.Image, prompts: list[str]):
         torch = self._torch
-        text_prompt = self.PROMPT_TEMPLATE.format(classes=", ".join(prompts))
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": image},
-                    {"type": "text", "text": text_prompt},
-                ],
-            }
-        ]
+        # Few-shot: перед кадром — диалог из примеров «кадр → правильный ответ»
+        messages, images = [], []
+        for s in self.shots:
+            messages += [
+                self.user_turn(s["image"], prompts),
+                {"role": "assistant", "content": [{"type": "text", "text": qwen_answer(
+                    s["boxes"], s["labels"], prompts, qwen_input_scale(self.processor, s["image"]))}]},
+            ]
+            images.append(s["image"])
+        messages.append(self.user_turn(image, prompts))
+        images.append(image)
         chat = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        inputs = self.processor(text=[chat], images=[image], return_tensors="pt").to(self.device)
+        inputs = self.processor(text=[chat], images=images, return_tensors="pt").to(self.device)
 
         with torch.no_grad():
             # temperature=0 через do_sample=False: воспроизводимость обязательна,
@@ -317,13 +525,10 @@ class QwenVLAdapter(BaseDetector):
         answer = self.processor.batch_decode(trimmed, skip_special_tokens=True)[0]
 
         # Масштаб входа: Qwen отдаёт координаты в сетке обработанного изображения.
+        # Кадр, о котором вопрос, — последний среди изображений диалога.
         grid = inputs.get("image_grid_thw")
         if grid is not None:
-            merge = getattr(self.processor.image_processor, "merge_size", 2)
-            patch = getattr(self.processor.image_processor, "patch_size", 14)
-            _, gh, gw = grid[0].tolist()
-            in_h, in_w = gh * patch, gw * patch
-            sx, sy = image.width / in_w, image.height / in_h
+            sx, sy = grid_scale(self.processor, grid[-1], image)
         else:
             sx = sy = 1.0
 

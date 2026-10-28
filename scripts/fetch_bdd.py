@@ -10,6 +10,9 @@
 
 Если задан HF_TOKEN (бесплатный токен с huggingface.co), лимит выше.
 
+Если уже создан файл кадров адаптации (scripts/make_adapt_split.py), качаются
+и они — ещё ~700 кадров ясного дня для few-shot и LoRA.
+
 Запуск:
     python scripts/fetch_bdd.py --config configs/experiment_bdd.yaml
 """
@@ -29,7 +32,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.data.acdc import load_domain  # noqa: E402
+from src.data.acdc import load_adaptation, load_domain  # noqa: E402
 
 BASE = "https://huggingface.co/datasets/dgural/bdd100k/resolve/main/"
 
@@ -75,6 +78,11 @@ def main() -> int:
         ds = load_domain(cfg, d, subset="all")
         paths += [s.image_path for s in ds]
         print(f"  {d}: {len(ds)} кадров", flush=True)
+    if "adaptation" in cfg and Path(cfg["adaptation"]["file"]).exists():
+        for part in ("train", "val"):
+            ds = load_adaptation(cfg, part)
+            paths += [s.image_path for s in ds]
+            print(f"  адаптация {part}: {len(ds)} кадров", flush=True)
     todo = [p for p in paths if not (p.exists() and p.stat().st_size > 0)]
     print(f"Нужно кадров: {len(paths)}, уже есть: {len(paths) - len(todo)}, качаю: {len(todo)}",
           flush=True)

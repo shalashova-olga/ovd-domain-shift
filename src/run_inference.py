@@ -31,6 +31,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.data.acdc import ACDCDetection, load_domains, predictions_root  # noqa: E402
+from src.fewshot import adapter_kwargs  # noqa: E402
 from src.models.adapters import build_detector  # noqa: E402
 
 
@@ -129,6 +130,9 @@ def run_one(
                 "model": model_key,
                 "adapter": model_cfg["adapter"],
                 "checkpoint": model_cfg["checkpoint"],
+                "mode": model_cfg.get("mode", "zero-shot"),
+                "base": model_cfg.get("base"),
+                "adaptation": detector.adaptation_meta,
                 "license": detector.license,
                 "domain": dataset.domain,
                 "split": dataset.split,
@@ -136,6 +140,7 @@ def run_one(
                 "prompts": prompts,
                 "classes": dataset.classes,
                 "box_threshold": detector.box_threshold,
+                "max_detections": detector.max_detections,
                 "n_images": len(samples),
                 "env": environment_fingerprint(),
             }
@@ -215,8 +220,9 @@ def main() -> None:
         jobs = []
         for domain, dataset in datasets.items():
             for variant in variants:
-                if (variant != cfg["default_prompt_variant"]
-                        and domain not in cfg["prompt_sensitivity_domains"]):
+                if variant != cfg["default_prompt_variant"] and (
+                        domain not in cfg["prompt_sensitivity_domains"]
+                        or not model_cfg.get("prompt_sensitivity", True)):
                     continue
                 out_path = out_root / model_key / f"{domain}__{variant}.jsonl"
                 if out_path.exists() and not args.overwrite:
@@ -241,6 +247,8 @@ def main() -> None:
                 device=cfg["device"],
                 checkpoint=model_cfg["checkpoint"],
                 box_threshold=model_cfg.get("box_threshold", 0.05),
+                max_detections=model_cfg.get("max_detections"),
+                **adapter_kwargs(cfg, model_cfg),
             )
             for dataset, variant, out_path in jobs:
                 prompts = build_prompts(prompt_cfg, variant, dataset.classes)

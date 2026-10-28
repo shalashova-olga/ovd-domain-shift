@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Скачивание нужной части BDD100K val (открытая копия на HuggingFace) и проверка.
 #
-# Качаются только кадры, отобранные в эксперимент (~1200 файлов, ~70 МБ).
+# Качаются только кадры, отобранные в эксперимент: ~1200 тестовых и ~700
+# кадров ясного дня для few-shot и LoRA (~110 МБ).
 # Ручного одобрения не нужно. Скачивая, вы соглашаетесь с лицензией BDD100K
 # (образовательное и исследовательское использование).
 #
@@ -18,4 +19,8 @@ CONFIG=configs/experiment_bdd.yaml
 
 python scripts/fetch_bdd.py --config "$CONFIG"
 python scripts/make_split.py --config "$CONFIG"
+# Кадры адаптации выбираются по разметке вне теста, поэтому докачиваются
+# вторым заходом; уже скачанные кадры пропускаются
+python scripts/make_adapt_split.py --config "$CONFIG"
+python scripts/fetch_bdd.py --config "$CONFIG"
 python scripts/check_data.py --config "$CONFIG"

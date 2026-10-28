@@ -7,6 +7,7 @@ transformers>=4.49.0          # Qwen2_5_VLForConditionalGeneration появил�
 accelerate>=0.27.0
 ultralytics>=8.3.0            # YOLO-World v2 и YOLO11
 qwen-vl-utils>=0.0.8
+peft>=0.13.0                  # LoRA: src/train_lora.py
 
 numpy>=1.24.0
 pandas>=2.0.0

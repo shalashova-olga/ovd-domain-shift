@@ -1,0 +1,37 @@
+{
+ "created": "2026-10-28T11:26:16",
+ "splits": [
+  "val"
+ ],
+ "seed": 0,
+ "dev_per_domain": 0,
+ "rule": "dev — целые видеозаписи из train; test — все остальные кадры",
+ "summary": {
+  "reference": {
+   "n_dev": 0,
+   "n_test": 300,
+   "dev_sequences": []
+  },
+  "night": {
+   "n_dev": 0,
+   "n_test": 300,
+   "dev_sequences": []
+  },
+  "rain": {
+   "n_dev": 0,
+   "n_test": 300,
+   "dev_sequences": []
+  },
+  "snow": {
+   "n_dev": 0,
+   "n_test": 300,
+   "dev_sequences": []
+  }
+ },
+ "dev": {
+  "reference": [],
+  "night": [],
+  "rain": [],
+  "snow": []
+ }
+}

@@ -314,6 +314,54 @@ def load_domains(cfg: dict, subset: str | None = None) -> dict[str, ACDCDetectio
     return out
 
 
+# --------------------------------------------------------------------------- #
+#               Размеченные кадры для адаптации (few-shot, LoRA)               #
+# --------------------------------------------------------------------------- #
+
+def adaptation_pool(cfg: dict) -> ACDCDetection:
+    """Кадры домена-источника, не входящие в тест, — из них берутся данные адаптации.
+
+    У BDD100K тест — подвыборка max_images_per_domain из всех кадров домена,
+    поэтому пул собирается из полного домена без этого ограничения. У ACDC
+    тестом служит всё, кроме dev, и пулом оказывается dev. Тестовые кадры
+    исключаются по всем доменам, а не только по источнику, — на случай
+    пересечения правил отбора доменов.
+    """
+    domain = cfg["adaptation"]["domain"]
+    full = load_domain({**cfg, "max_images_per_domain": None}, domain, subset="all")
+    test_ids: set[str] = set()
+    for d in cfg["domains"]:
+        test_ids |= {s.image_id for s in load_domain(cfg, d, subset=cfg.get("eval_subset", "test"))}
+    return full.filtered([s.image_id for s in full if s.image_id not in test_ids], "adapt")
+
+
+def load_adaptation(cfg: dict, part: str) -> ACDCDetection:
+    """Часть данных адаптации: train (обучение LoRA и примеры few-shot) или val.
+
+    Порядок кадров берётся из файла разбиения, а не из датасета: примеры
+    few-shot выбираются по этому порядку, и он не должен зависеть от того,
+    как разметка отсортирована на диске.
+    """
+    path = Path(cfg["adaptation"]["file"])
+    if not path.exists():
+        raise RuntimeError(
+            f"Нет файла {path}. Создайте его один раз до обучения и few-shot:\n"
+            f"    python scripts/make_adapt_split.py --config <конфиг>"
+        )
+    ids = json.loads(path.read_text(encoding="utf-8"))[part]
+    pool = adaptation_pool(cfg)
+    by_id = {s.image_id: s for s in pool}
+    missing = [i for i in ids if i not in by_id]
+    if missing:
+        raise RuntimeError(
+            f"{len(missing)} кадров адаптации ({part}) нет в пуле — например {missing[0]}.\n"
+            f"Файл {cfg['adaptation']['file']} создан для других данных или теста."
+        )
+    out = pool.filtered(ids, part)
+    out.samples = [by_id[i] for i in ids]
+    return out
+
+
 def predictions_root(cfg: dict, subset: str | None = None) -> Path:
     """Журналы dev пишутся отдельно от test, чтобы их нельзя было смешать."""
     root = Path(cfg["output_dir"])

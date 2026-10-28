@@ -22,7 +22,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.data.acdc import load_domain  # noqa: E402
+from src.data.acdc import load_adaptation, load_domain  # noqa: E402
 
 
 def _diagnose(root: Path) -> None:
@@ -120,6 +120,30 @@ def main() -> int:
             print(f"  {domain:<10} dev {len(ids) - len(unknown):>4} · test {len(ds) - len(ids) + len(unknown):>5}"
                   f" · общих записей {len(shared)} · неизвестных кадров {len(unknown)}  {status}")
             ok &= status == "ok"
+
+    if "adaptation" in cfg:
+        print("\nКадры адаптации (few-shot и LoRA):")
+        if not Path(cfg["adaptation"]["file"]).exists():
+            print(f"  {cfg['adaptation']['file']} ещё нет — создайте: python scripts/make_adapt_split.py")
+        else:
+            test_ids = set()
+            for ds in loaded.values():
+                test_ids |= {s.image_id for s in ds}
+            for part in ("train", "val"):
+                try:
+                    ds = load_adaptation(cfg | {"data_root": str(root)}, part)
+                except RuntimeError as e:
+                    print(f"  {part:<6} [FAIL] {str(e).splitlines()[0]}")
+                    ok = False
+                    continue
+                missing = sum(not s.image_path.exists() for s in ds)
+                shared = len({s.image_id for s in ds} & test_ids)
+                status = "ok" if not missing and not shared else "[FAIL]"
+                print(f"  {part:<6} {len(ds):>4} кадров · нет файла {missing} · "
+                      f"общих с тестом {shared}  {status}")
+                if missing:
+                    print("         докачайте: bash scripts/download_bdd.sh")
+                ok &= status == "ok"
 
     if ok:
         print("\n[OK] данные готовы к прогону")
