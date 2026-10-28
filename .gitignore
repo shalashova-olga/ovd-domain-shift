@@ -1,6 +1,6 @@
 cookies*.txt
-data/
-logs/
+/data/
+/logs/
 *.partial
 *.pt
 *.pyc
