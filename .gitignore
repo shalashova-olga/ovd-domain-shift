@@ -1,0 +1,11 @@
+cookies*.txt
+data/
+logs/
+*.partial
+*.pt
+*.pyc
+__pycache__/
+.pytest_cache/
+results/predictions*/
+results_*.tar.gz
+.venv/

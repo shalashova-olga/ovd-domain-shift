@@ -1,0 +1,137 @@
+# BDD100K: открытая копия val-части (HuggingFace dgural/bdd100k), скачивается
+# без ручного одобрения. Запасной датасет на время, пока нет доступа к ACDC.
+# Протокол, модели и метрики те же, что в experiment.yaml.
+#
+# Домены — по меткам кадра. Ночь только при ясной погоде, дождь и снег только
+# днём, чтобы эффекты не смешивались. Тумана в BDD100K val 13 кадров — домен
+# fog не используется. В отличие от ACDC, домены сняты в разных местах:
+# сдвиг условий смешан со сменой местности (ограничение отчёта).
+
+dataset: bdd100k
+data_root: data/bdd100k
+splits: [val]
+bdd_domains:
+  reference: {weather: [clear], timeofday: [daytime]}
+  night:     {weather: [clear], timeofday: [night]}
+  rain:      {weather: [rainy], timeofday: [daytime]}
+  snow:      {weather: [snowy], timeofday: [daytime]}
+# Фиксированная подвыборка на домен, чтобы прогон 8 моделей уложился в 2–3 часа
+max_images_per_domain: 300
+
+split_file: configs/split_bdd.json
+dev_per_domain: 0            # промпт не подбирается — все кадры в test
+eval_subset: test
+
+min_box_area: 16.0
+device: cuda
+warmup: 3
+seed: 0
+
+output_dir: results/predictions_bdd
+prompts_file: configs/prompts.yaml
+default_prompt_variant: plain
+
+source_domain: reference     # ясный день
+domains: [reference, night, rain, snow]
+
+prompt_sensitivity_domains: [reference, night]
+prompt_sensitivity_max_images: 100
+
+# --------------------------------------------------------------------------- #
+#                               Модели (8 шт.)                                #
+# --------------------------------------------------------------------------- #
+# box_threshold намеренно низкий у всех: отсечение по confidence — предмет
+# исследования, поэтому сырые предсказания сохраняются целиком, а пороги
+# подбираются на этапе анализа.
+
+models:
+  grounding-dino-tiny:
+    adapter: grounding-dino
+    checkpoint: IDEA-Research/grounding-dino-tiny
+    box_threshold: 0.05
+    params_m: 172
+    license: Apache-2.0
+
+  grounding-dino-base:
+    adapter: grounding-dino
+    checkpoint: IDEA-Research/grounding-dino-base
+    box_threshold: 0.05
+    params_m: 233
+    license: Apache-2.0
+
+  owlv2-base:
+    adapter: owlv2
+    checkpoint: google/owlv2-base-patch16-ensemble
+    box_threshold: 0.05
+    params_m: 154
+    license: Apache-2.0
+
+  owlv2-large:
+    adapter: owlv2
+    checkpoint: google/owlv2-large-patch14-ensemble
+    box_threshold: 0.05
+    params_m: 430
+    license: Apache-2.0
+
+  owlvit-base:
+    adapter: owlvit                     # свои классы: веса v1 не грузятся в OWLv2
+    checkpoint: google/owlvit-base-patch32
+    box_threshold: 0.05
+    params_m: 154
+    license: Apache-2.0
+
+  yolo-world-l:
+    adapter: yolo-world
+    checkpoint: yolov8l-worldv2.pt
+    box_threshold: 0.03
+    params_m: 48
+    license: AGPL-3.0
+
+  qwen2.5-vl-7b:
+    adapter: qwen2.5-vl
+    checkpoint: Qwen/Qwen2.5-VL-7B-Instruct
+    box_threshold: 0.0                  # VLM не отдаёт честный скор, порог не применим
+    params_m: 8290
+    license: Apache-2.0
+
+  yolo11l-coco:
+    adapter: closed-set
+    checkpoint: yolo11l.pt
+    box_threshold: 0.03
+    params_m: 25
+    license: AGPL-3.0
+
+# --------------------------------------------------------------------------- #
+#                            Параметры оценки                                 #
+# --------------------------------------------------------------------------- #
+
+evaluation:
+  iou_threshold: 0.5
+  working_threshold: 0.30       # рабочая точка по умолчанию для P/R/F1
+  target_precision: 0.90        # требуемая чистота псевдоразметки
+  calibration_bins: 15
+  bootstrap_iterations: 500
+  seed: 0
+
+  # Жёсткий отсев: модель, не прошедшая его, непригодна как учитель
+  # при любых значениях остальных метрик.
+  gates:
+    invalid_rate:
+      direction: max            # не выше значения
+      value: 0.01
+    mAP@50:
+      direction: min            # не ниже значения
+      value: 0.15
+
+  # Веса заданы ДО эксперимента и не подбираются под результат.
+  # Отличие от типового взвешивания: precision при рабочем пороге весит
+  # больше mAP, поскольку ошибочный бокс в обучающей выборке ученика вреднее
+  # пропущенного; калибровка входит отдельным весом, так как от неё зависит
+  # переносимость порога между доменами.
+  composite_weights:
+    precision:      {weight: 0.35, direction: higher_better}
+    mAP@50:         {weight: 0.25, direction: higher_better}
+    recall_at_P90:  {weight: 0.20, direction: higher_better}
+    D-ECE:          {weight: 0.10, direction: lower_better}
+    latency_p95_ms: {weight: 0.07, direction: lower_better}
+    peak_vram_mb:   {weight: 0.03, direction: lower_better}

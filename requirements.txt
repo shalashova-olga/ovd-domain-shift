@@ -1,0 +1,20 @@
+# Версии зафиксированы: постобработка детекции в transformers менялась между
+# релизами, и без фиксации числа не воспроизводятся.
+
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.49.0          # Qwen2_5_VLForConditionalGeneration появился здесь
+accelerate>=0.27.0
+ultralytics>=8.3.0            # YOLO-World v2 и YOLO11
+qwen-vl-utils>=0.0.8
+
+numpy>=1.24.0
+pandas>=2.0.0
+pillow>=10.0.0
+pyyaml>=6.0
+tqdm>=4.66.0
+
+matplotlib>=3.7.0             # диаграммы надёжности и кривые P-R
+seaborn>=0.13.0
+
+pytest>=7.4.0

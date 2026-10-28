@@ -1,0 +1,48 @@
+id,запрос,источник_записи,название,год,тип,этап_отсева,решение,причина
+R01,Q1,arXiv/ECCVW,Open-Vocabulary Object Detectors: Robustness Challenges under Distribution Shifts (Chhipa et al.),2024,статья (воркшоп ECCV),полный текст,включена,прямой предшественник: устойчивость OVD к сдвигу
+R02,Q1,arXiv,Vision-Language Model for Object Detection and Segmentation: A Review and Evaluation (2504.09480),2025,обзор,аннотация,исключена,обзор без собственного протокола переноса порога; используется как фон
+R03,Q1,arXiv,Object Detection with Multimodal Large Vision-Language Models: An In-depth Review (2508.19294),2025,обзор,аннотация,исключена,обзор; не про сдвиг домена и калибровку
+R04,Q2,arXiv,Generalization Under Scrutiny: Cross-Domain Detection Progresses Pitfalls and Persistent Challenges (2604.08230),2026,обзор,аннотация,исключена,обзор CDOD без анализа калибровки в аннотации; используется как фон
+R05,Q2,NeurIPS,Scaling Open-Vocabulary Object Detection (Minderer et al.),2023,статья (NeurIPS),полный текст,включена,модель OWLv2 из сравнения; самообучение на псевдоразметке
+R06,Q2,NeurIPS,Domain Adaptation for Large-Vocabulary Object Detectors (Jiang et al.),2024,статья (NeurIPS),аннотация+фрагменты,включена,адаптация больших детекторов; фиксированный порог псевдоразметки
+R07,Q2,arXiv,PISA: Pseudo-Individual Source-Domain Feature Adaptation for Test-Time OVD (2608.14142),2026,препринт,заголовок,исключена,адаптация во время теста без анализа порога; кандидат на чтение в ВКР
+R08,Q2,NeurIPS,Open-Vocabulary Object Detection via Language Hierarchy,2024,статья (NeurIPS),аннотация,исключена,сдвиг словаря а не условий съёмки
+R09,Q2,ECCV,Open Vocabulary Object Detection with Pseudo Bounding-Box Labels,2022,статья (ECCV),аннотация,исключена,псевдоразметка для расширения словаря а не для сдвига домена
+R10,Q2,arXiv,Refined Pseudo labeling for Source-free Domain Adaptive Object Detection (2303.03728),2023,препринт,аннотация,исключена,дублирует идею R12 (порог псевдометок) с меньшим охватом
+R11,Q2,arXiv,SSAL: Synergizing between Self-Training and Adversarial Learning for DAOD (2110.00249),2021,статья (NeurIPS),аннотация,исключена,предшествует R13 тех же авторов; учтена через R13
+R12,snowball,ICML,Learning Domain Adaptive Object Detection with Probabilistic Teacher (Chen et al.),2022,статья (ICML),аннотация,включена,отказ от ручного порога псевдометок
+R13,Q3,NeurIPS,Towards Improving Calibration in Object Detection Under Domain Shift (Munir et al.),2022,статья (NeurIPS),аннотация,включена,калибровка детекторов при сдвиге домена
+R14,Q4,ECCV,On Calibration of Object Detectors: Pitfalls Evaluation and Baselines (Kuzucu et al.),2024,статья (ECCV),аннотация,включена,критика D-ECE и temperature scaling; LaECE
+R15,Q4,deepai,A Review of Uncertainty Calibration in Pretrained Object Detectors,—,обзор,заголовок,исключена,обзор; приоритет у R14 с собственным протоколом
+R16,Q5,learnopencv,Fine-Tuning Grounding DINO (туториал),—,блог,заголовок,исключена,не научная публикация
+R17,Q5,arXiv,Does Your VFM Speak Plant? (2604.09920),2026,препринт,аннотация,исключена,предметная область растений; упоминает порог без целевой разметки
+R18,Q5,arXiv,DetRefiner: Model-Agnostic Detection Refinement with Feature Fusion Transformer (2605.10190),2026,препринт,аннотация,исключена,постобработка уверенности OVD; кандидат метода для ВКР
+R19,Q5,arXiv,The devil is in the fine-grained details: Evaluating OVD for fine-grained understanding (2311.17518),2023,статья,заголовок,исключена,мелкозернистые классы а не условия съёмки
+R20,Q5,arXiv,From Pixels to Concepts: Do Segmentation Models Understand What They Segment? (2605.09591),2026,препринт,заголовок,исключена,сегментация
+R21,Q5,arXiv,ELSA: Evaluating Localization of Social Activities using OVD (2406.01551),2024,препринт,заголовок,исключена,другая задача
+R22,Q5,arXiv,Grounding DINO 1.5 (2405.10300),2024,технический отчёт,заголовок,исключена,закрытая модель через API; в сравнении используется открытая версия R27
+R23,Q6,alphaxiv,DAWN: Vehicle Detection in Adverse Weather Nature Dataset (2008.05402),2020,датасет,аннотация,исключена,малый датасет без пар условий; альтернатива ACDC в отчёте
+R24,Q6,msi.elpub.ru,Современная наука и инновации №4 (40) 2022 (выпуск журнала),2022,выпуск журнала,заголовок,исключена,ссылка на весь выпуск без конкретной статьи
+R25,Q6,cyberleninka,Алгоритмы компьютерного зрения для распознавания объектов в условиях плохой видимости,—,обзорная статья,аннотация,исключена,обзорная без эксперимента и протокола
+R26,Q6,researchgate,Исследование возможности улучшения видеопоследовательности полученной в сложных погодных условиях,—,статья,заголовок,исключена,улучшение изображения а не детекция
+R27,snowball,arXiv/ECCV,Grounding DINO: Marrying DINO with Grounded Pre-Training for Open-Set Object Detection (Liu et al.),2024,статья (ECCV),полный текст,включена,модель из сравнения
+R28,Q6,timeweb,Нейросеть YOLO: как работает алгоритм (блог),—,блог,заголовок,исключена,не научная публикация
+R29,Q6,mathnet,Известия КБНЦ РАН т. 27 № 1: обработка видеоданных в условиях плохой видимости (YOLO + вейвлетные сети),2025,статья,аннотация,исключена,отечественная; закрытые данные и нет разбивки по условиям — R30 сильнее по журналу и протоколу
+R30,Q6,computeroptics.ru,Исследование нейросетевых алгоритмов распознавания объектов железнодорожной инфраструктуры на видеоизображениях (Медведева Перевощикова),2025,статья (Компьютерная оптика),полный текст,включена,отечественная прикладная работа; тест в разных погодных условиях
+R31,Q6,videonet.ru,Нейросетевой детектор типов объектов (страница продукта),—,коммерческая страница,заголовок,исключена,не научная публикация
+R32,Q6,begemot.ai,Методы улучшения распознавания объектов в условиях плохой видимости (сгенерированный проект),—,прочее,заголовок,исключена,не научная публикация
+R33,Q7,ECCV,Revisiting Domain-Adaptive Object Detection in Adverse Weather by the Generation and Composition of High-Quality Pseudo-labels (Zhao et al.),2024,статья (ECCV),аннотация,включена,качество псевдометок в плохую погоду
+R34,Q7,ScienceDirect,Teacher–student adversarial YOLO for domain adaptive detection in traffic scenes under adverse weather,2025,статья (журнал),аннотация,исключена,учитель-ученик на CycleGAN; то же направление что R33 с меньшим охватом
+R35,Q7,ACCV,Auxiliary Domain-guided Adaptive Object Detection in Adverse Weather Conditions,2024,статья (ACCV),аннотация,исключена,генеративный перенос стиля; не про порог учителя
+R36,Q7,arXiv,Multilevel Knowledge Transfer for Cross-Domain Object Detection (2108.00977),2021,препринт,заголовок,исключена,устаревший DAOD-метод
+R37,Q7,arXiv,Real-World Perception for Autonomous Driving in Adverse Weather: Enhancing Standard Detectors via Foundation-Guided Auto-Annotation (Gohari et al.),2026,препринт,аннотация,включена,ближайший сосед: авторазметка большой моделью в плохую погоду
+R38,Q7,arXiv,WILD SAM: Simulated-and-Real Data Augmentation under Challenging Weather (2605.01081),2026,препринт,заголовок,исключена,аугментация данных а не разметчик
+R39,Q7,arXiv,CF-YOLO: Cross Fusion YOLO for Object Detection in Adverse Weather (2206.01381),2022,препринт,заголовок,исключена,архитектура детектора; не про псевдоразметку
+R40,Q8,arXiv,TLDR: Traffic Light Detection using Fourier Domain Adaptation in Hostile WeatheR (2411.07901),2024,препринт,заголовок,исключена,узкая задача светофоров
+R41,Q8,ICCV,Debiased Teacher (ICCV 2025 supplemental),2025,дополнительные материалы,заголовок,исключена,найдены только дополнительные материалы; кандидат на чтение в ВКР
+R42,snowball,arXiv/ICCV,ACDC: The Adverse Conditions Dataset with Correspondences (Sakaridis et al.),2021/2024,статья (ICCV) + расширенная версия,полный текст,включена,датасет эксперимента
+R43,snowball,arXiv/CVPR,YOLO-World: Real-Time Open-Vocabulary Object Detection (Cheng et al.),2024,статья (CVPR),аннотация,включена,модель из сравнения
+R44,snowball,arXiv,Qwen2.5-VL Technical Report (Bai et al.),2025,технический отчёт,аннотация,включена,VLM из сравнения
+R45,snowball,CVPR-W,Multivariate Confidence Calibration for Object Detection (Küppers et al.),2020,статья (воркшоп CVPR),аннотация,включена,метрика D-ECE используемая в эксперименте
+R46,snowball,arXiv,Semantically Compatible Knowledge Distillation for Cross-Domain OD with Vision Foundation Models — SLE-T (Zhang et al.),2026,препринт,полный текст,включена,ближайший сосед: учитель-VFM и ACDC
+R47,snowball,ECCV,TIDE: A General Toolbox for Identifying Object Detection Errors (Bolya et al.),2020,статья (ECCV),—,методическая ссылка,типизация ошибок в анализе; вне счёта 15 тематических работ
