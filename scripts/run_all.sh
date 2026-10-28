@@ -40,11 +40,14 @@ echo "Модели: $MODELS"
 
 # Модель, которая не запускается, исключается из прогона, а не останавливает
 # его: остальные досчитаются, а о проблеме будет запись в журнале.
-echo "== Проверка каждой модели на 3 кадрах =="
+# Короткая проверка идёт на домене-источнике из конфига: набор доменов у
+# ACDC и BDD100K разный (в BDD100K нет тумана).
+SMOKE_DOMAIN=$(python -c "import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))['source_domain'])" "$CONFIG")
+echo "== Проверка каждой модели на 3 кадрах ($SMOKE_DOMAIN) =="
 OK_MODELS=""
 FAILED=""
 for m in $MODELS; do
-    if python -m src.run_inference --config "$CONFIG" --model "$m" --domain fog --limit 3 --overwrite; then
+    if python -m src.run_inference --config "$CONFIG" --model "$m" --domain "$SMOKE_DOMAIN" --limit 3 --overwrite; then
         OK_MODELS="$OK_MODELS $m"
     else
         echo "[!] Модель $m не запускается — пропускаю её"
@@ -69,8 +72,10 @@ python -m src.analyze --config "$CONFIG"
 # журналы предсказаний, чтобы пересчитать что угодно без повторного инференса.
 STAMP=$(date +%Y%m%d_%H%M)
 PRED_DIR=$(python -c "import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))['output_dir'])" "$CONFIG")
-tar -czf "results_${STAMP}_analysis.tar.gz" results/tables results/analysis results/data_passport.md logs configs docs
-tar -czf "results_${STAMP}_predictions.tar.gz" --exclude="_debug" "$PRED_DIR"
+# В архив попадает только то, что реально посчитано
+PARTS=$(for p in results/tables results/analysis results/data_passport.md logs configs docs; do [ -e "$p" ] && echo "$p"; done)
+tar -czf "results_${STAMP}_analysis.tar.gz" $PARTS
+[ -d "$PRED_DIR" ] && tar -czf "results_${STAMP}_predictions.tar.gz" --exclude="_debug" "$PRED_DIR"
 echo
 ls -lh results_${STAMP}_*.tar.gz
 
