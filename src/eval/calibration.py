@@ -177,7 +177,9 @@ def threshold_transfer_penalty(
         "n_boxes_oracle": n_oracle,
         # Во сколько раз меняется объём псевдоразметки при переносе порога:
         # падение объёма — скрытая цена сохранения чистоты.
-        "yield_ratio": n_transferred / max(n_oracle, 1),
+        # Если целевая precision в домене недостижима ни при каком пороге,
+        # оракула нет и отношение не определено
+        "yield_ratio": n_transferred / n_oracle if n_oracle else float("nan"),
     }
 
 
