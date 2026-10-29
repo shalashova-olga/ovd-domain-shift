@@ -87,6 +87,20 @@ def test_qwen_answer_scale_order_and_labels():
     np.testing.assert_allclose(got, boxes[::-1])
 
 
+def test_qwen3_relative_coordinates():
+    """Qwen3-VL отвечает в шкале 0–1000 по обеим осям, независимо от сетки входа."""
+    from PIL import Image
+
+    from src.models.adapters import Qwen3VLAdapter
+
+    a = Qwen3VLAdapter.__new__(Qwen3VLAdapter)
+    assert "0 to 1000" in a.user_turn(Image.new("RGB", (8, 8)), CLASSES)["content"][1]["text"]
+    sx, sy = a._answer_scale({"image_grid_thw": None}, Image.new("RGB", (1280, 720)))
+    got, _, lbl, _ = a._parse('[{"bbox_2d": [500, 500, 1000, 1000], "label": "car"}]', CLASSES, sx, sy)
+    np.testing.assert_allclose(got, [[640, 360, 1280, 720]])
+    assert list(lbl) == [2]
+
+
 # --------------------------------------------------------------------------- #
 #                 Номера классов при обучении Grounding DINO                  #
 # --------------------------------------------------------------------------- #

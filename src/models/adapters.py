@@ -387,6 +387,23 @@ class YOLOWorldAdapter(BaseDetector):
         return boxes, scores, labels, None
 
 
+class YOLOEAdapter(YOLOWorldAdapter):
+    """YOLOE (ultralytics, 2025) — следующее поколение после YOLO-World.
+
+    Текстовые запросы кодируются MobileCLIP; маски сегментации не используются,
+    берутся только боксы.
+    """
+
+    name = "yoloe"
+
+    def _load(self, checkpoint: str = "yoloe-26l-seg.pt", **kw: Any) -> None:
+        from ultralytics import YOLOE
+
+        self.checkpoint = checkpoint
+        self.model = YOLOE(checkpoint)
+        self._prompt_cache: list[str] | None = None
+
+
 # --------------------------------------------------------------------------- #
 #                         VLM с grounding (Qwen2.5-VL)                        #
 # --------------------------------------------------------------------------- #
@@ -448,6 +465,7 @@ class QwenVLAdapter(BaseDetector):
     name = "qwen2.5-vl-7b"
     license = "Apache-2.0"
     open_vocabulary = True
+    MODEL_CLASS = "Qwen2_5_VLForConditionalGeneration"
 
     PROMPT_TEMPLATE = (
         "Detect all objects of the following categories in this image: {classes}.\n"
@@ -468,12 +486,13 @@ class QwenVLAdapter(BaseDetector):
         **kw: Any,
     ) -> None:
         import torch
-        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        import transformers
+        from transformers import AutoProcessor
 
         self.checkpoint = checkpoint
         self.max_new_tokens = max_new_tokens
         self.processor = AutoProcessor.from_pretrained(checkpoint)
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        model = getattr(transformers, self.MODEL_CLASS).from_pretrained(
             checkpoint, torch_dtype=torch.bfloat16, device_map=self.device
         )
         if lora:
@@ -524,16 +543,17 @@ class QwenVLAdapter(BaseDetector):
         trimmed = generated[:, inputs.input_ids.shape[1]:]
         answer = self.processor.batch_decode(trimmed, skip_special_tokens=True)[0]
 
-        # Масштаб входа: Qwen отдаёт координаты в сетке обработанного изображения.
-        # Кадр, о котором вопрос, — последний среди изображений диалога.
-        grid = inputs.get("image_grid_thw")
-        if grid is not None:
-            sx, sy = grid_scale(self.processor, grid[-1], image)
-        else:
-            sx = sy = 1.0
-
+        sx, sy = self._answer_scale(inputs, image)
         boxes, scores, labels, n_bad = self._parse(answer, prompts, sx, sy)
         return boxes, scores, labels, {"answer": answer, "n_unparseable": n_bad}
+
+    def _answer_scale(self, inputs, image: Image.Image) -> tuple[float, float]:
+        # Масштаб входа: Qwen2.5-VL отдаёт координаты в сетке обработанного
+        # изображения. Кадр, о котором вопрос, — последний среди изображений диалога.
+        grid = inputs.get("image_grid_thw")
+        if grid is None:
+            return 1.0, 1.0
+        return grid_scale(self.processor, grid[-1], image)
 
     def _parse(self, answer: str, prompts: list[str], sx: float, sy: float):
         """Разобрать текстовый ответ в боксы, считая неразобранные элементы."""
@@ -593,6 +613,23 @@ class QwenVLAdapter(BaseDetector):
             validity.n_unparseable = n_bad
             validity.n_raw += n_bad
         return dets, validity, lat, vram
+
+
+class Qwen3VLAdapter(QwenVLAdapter):
+    """Qwen3-VL: та же обвязка, но координаты в ответе относительные, от 0 до 1000.
+
+    Так модель обучена отвечать на запросы grounding, поэтому инструкция
+    просит именно эту шкалу, а не пиксели.
+    """
+
+    name = "qwen3-vl-8b"
+    MODEL_CLASS = "Qwen3VLForConditionalGeneration"
+    PROMPT_TEMPLATE = QwenVLAdapter.PROMPT_TEMPLATE.replace(
+        "integers, pixel coordinates", "integers, relative coordinates from 0 to 1000"
+    )
+
+    def _answer_scale(self, inputs, image: Image.Image) -> tuple[float, float]:
+        return image.width / 1000, image.height / 1000
 
 
 # --------------------------------------------------------------------------- #
@@ -660,7 +697,9 @@ REGISTRY: dict[str, type[BaseDetector]] = {
     "owlv2": OWLv2Adapter,
     "owlvit": OWLViTAdapter,
     "yolo-world": YOLOWorldAdapter,
+    "yoloe": YOLOEAdapter,
     "qwen2.5-vl": QwenVLAdapter,
+    "qwen3-vl": Qwen3VLAdapter,
     "closed-set": ClosedSetAdapter,
 }
 

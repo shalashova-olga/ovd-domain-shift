@@ -49,7 +49,7 @@ adaptation:
   n_val: 100                   # контроль переобучения LoRA
 
 # --------------------------------------------------------------------------- #
-#                    Модели: 8 zero-shot и режимы адаптации                   #
+#                   Модели: 10 zero-shot и режимы адаптации                   #
 # --------------------------------------------------------------------------- #
 # box_threshold намеренно низкий у всех: отсечение по confidence — предмет
 # исследования, поэтому сырые предсказания сохраняются целиком, а пороги
@@ -111,6 +111,20 @@ models:
     box_threshold: 0.03
     params_m: 25
     license: AGPL-3.0
+
+  # Следующие поколения тех же семейств: YOLOE после YOLO-World,
+  # Qwen3-VL после Qwen2.5-VL
+  yoloe-26l:
+    adapter: yoloe
+    checkpoint: yoloe-26l-seg.pt
+    box_threshold: 0.03
+    license: AGPL-3.0
+
+  qwen3-vl-8b:
+    adapter: qwen3-vl
+    checkpoint: Qwen/Qwen3-VL-8B-Instruct
+    box_threshold: 0.0
+    license: Apache-2.0
 
 # --------------------------------------------------------------------------- #
 #                  Адаптация: few-shot и LoRA (раздел adaptation)             #

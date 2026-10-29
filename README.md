@@ -65,7 +65,7 @@ ACDC: 400 + 100 на условие, у ночи 106 в val; ясный день
 
 ## Модели
 
-Восемь моделей, пять семейств, единый протокол инференса и постобработки.
+Восемь моделей (в конфиге BDD100K — десять), пять семейств, единый протокол инференса и постобработки.
 
 | Ключ | Модель | Тип | Лицензия |
 |---|---|---|---|
@@ -77,6 +77,8 @@ ACDC: 400 + 100 на условие, у ночи 106 в val; ясный день
 | `yolo-world-l` | YOLO-World-L v2 | open-vocab, real-time | AGPL-3.0 |
 | `qwen2.5-vl-7b` | Qwen2.5-VL-7B-Instruct | VLM с grounding | Apache-2.0 |
 | `yolo11l-coco` | YOLO11-L (COCO) | closed-set, контроль | AGPL-3.0 |
+| `yoloe-26l` | YOLOE-26-L | open-vocab, real-time, преемник YOLO-World | AGPL-3.0 |
+| `qwen3-vl-8b` | Qwen3-VL-8B-Instruct | VLM с grounding, преемник Qwen2.5-VL | Apache-2.0 |
 
 Closed-set модель нужна, чтобы отделить эффект открытого словаря от эффекта
 масштаба: без неё нельзя утверждать, что устойчивость связана именно с
@@ -132,14 +134,14 @@ scripts/
   make_adapt_split.py  кадры для few-shot и LoRA
   fetch_bdd.py         скачивание нужных кадров BDD100K
   run_all.sh           полный прогон: проверка, обучение LoRA, инференс, метрики, анализ
-tests/                 39 тестов на случаях с известным ответом
+tests/                 40 тестов на случаях с известным ответом
 ```
 
 ## Воспроизведение
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -v                    # 39 тестов, несколько секунд
+python -m pytest tests/ -v                    # 40 тестов, несколько секунд
 
 # Данные: регистрация на acdc.vision.ee.ethz.ch, затем
 #   data/ACDC/rgb_anon/{fog,night,rain,snow}/...
