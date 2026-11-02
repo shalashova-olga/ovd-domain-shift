@@ -632,6 +632,17 @@ class Qwen3VLAdapter(QwenVLAdapter):
         return image.width / 1000, image.height / 1000
 
 
+class Qwen3VLMoeAdapter(Qwen3VLAdapter):
+    """Qwen3-VL MoE: те же запросы и координаты, отдельная архитектура весов.
+
+    У 30B-A3B активна только часть экспертов на токен, но загружаются все
+    веса. Класс dense-модели Qwen3VLForConditionalGeneration не подходит.
+    """
+
+    name = "qwen3-vl-30b-a3b"
+    MODEL_CLASS = "Qwen3VLMoeForConditionalGeneration"
+
+
 # --------------------------------------------------------------------------- #
 #                      Closed-set baseline (контрольная точка)                #
 # --------------------------------------------------------------------------- #
@@ -700,6 +711,7 @@ REGISTRY: dict[str, type[BaseDetector]] = {
     "yoloe": YOLOEAdapter,
     "qwen2.5-vl": QwenVLAdapter,
     "qwen3-vl": Qwen3VLAdapter,
+    "qwen3-vl-moe": Qwen3VLMoeAdapter,
     "closed-set": ClosedSetAdapter,
 }
 

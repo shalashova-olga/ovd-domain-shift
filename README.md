@@ -65,7 +65,8 @@ ACDC: 400 + 100 на условие, у ночи 106 в val; ясный день
 
 ## Модели
 
-Восемь моделей (в конфиге BDD100K — десять), пять семейств, единый протокол инференса и постобработки.
+Восемь исходных моделей; в конфиге BDD100K также добавлены YOLOE-26L,
+Qwen3-VL-8B и Qwen3-VL-30B-A3B. Все используют общий формат предсказаний.
 
 | Ключ | Модель | Тип | Лицензия |
 |---|---|---|---|
@@ -79,6 +80,7 @@ ACDC: 400 + 100 на условие, у ночи 106 в val; ясный день
 | `yolo11l-coco` | YOLO11-L (COCO) | closed-set, контроль | AGPL-3.0 |
 | `yoloe-26l` | YOLOE-26-L | open-vocab, real-time, преемник YOLO-World | AGPL-3.0 |
 | `qwen3-vl-8b` | Qwen3-VL-8B-Instruct | VLM с grounding, преемник Qwen2.5-VL | Apache-2.0 |
+| `qwen3-vl-30b-a3b` | Qwen3-VL-30B-A3B-Instruct | VLM с grounding, MoE | Apache-2.0 |
 
 Closed-set модель нужна, чтобы отделить эффект открытого словаря от эффекта
 масштаба: без неё нельзя утверждать, что устойчивость связана именно с
@@ -134,14 +136,14 @@ scripts/
   make_adapt_split.py  кадры для few-shot и LoRA
   fetch_bdd.py         скачивание нужных кадров BDD100K
   run_all.sh           полный прогон: проверка, обучение LoRA, инференс, метрики, анализ
-tests/                 40 тестов на случаях с известным ответом
+tests/                 метрики, адаптация и выбор архитектуры Qwen
 ```
 
 ## Воспроизведение
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -v                    # 40 тестов, несколько секунд
+python -m pytest tests/ -v                    # проверки без загрузки весов моделей
 
 # Данные: регистрация на acdc.vision.ee.ethz.ch, затем
 #   data/ACDC/rgb_anon/{fog,night,rain,snow}/...
@@ -167,6 +169,22 @@ CONFIG=configs/experiment_bdd.yaml bash scripts/run_all.sh
 
 Ограничение BDD100K: домены сняты в разных местах, поэтому сдвиг погоды
 смешан со сменой местности; тумана в val почти нет.
+
+Qwen3-VL-30B-A3B запускается отдельно, когда GPU свободна. У MoE активна
+только часть экспертов, но все веса должны помещаться в памяти: около
+58 ГиБ в BF16 плюс активации и KV-кэш. Используется тот же набор кадров,
+промпт, лимит 2048 новых токенов и формат координат 0–1000, что у 8B.
+Класс загрузки — `Qwen3VLMoeForConditionalGeneration`, как в
+[карточке модели](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Instruct).
+
+```bash
+# Сначала один кадр. Результат хранится отдельно в _debug.
+python -m src.run_inference --config configs/experiment_bdd.yaml \
+  --model qwen3-vl-30b-a3b --domain reference --limit 1
+
+# После успешной проверки — все домены, таблицы и анализ.
+MODELS="qwen3-vl-30b-a3b" CONFIG=configs/experiment_bdd.yaml bash scripts/run_all.sh
+```
 
 На сервере с GPU всё одной командой — установка, затем прогон в tmux:
 

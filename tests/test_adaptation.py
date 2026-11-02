@@ -87,13 +87,15 @@ def test_qwen_answer_scale_order_and_labels():
     np.testing.assert_allclose(got, boxes[::-1])
 
 
-def test_qwen3_relative_coordinates():
+@pytest.mark.parametrize("adapter_name", ["Qwen3VLAdapter", "Qwen3VLMoeAdapter"])
+def test_qwen3_relative_coordinates(adapter_name):
     """Qwen3-VL отвечает в шкале 0–1000 по обеим осям, независимо от сетки входа."""
     from PIL import Image
 
-    from src.models.adapters import Qwen3VLAdapter
+    from src.models import adapters
 
-    a = Qwen3VLAdapter.__new__(Qwen3VLAdapter)
+    adapter = getattr(adapters, adapter_name)
+    a = adapter.__new__(adapter)
     assert "0 to 1000" in a.user_turn(Image.new("RGB", (8, 8)), CLASSES)["content"][1]["text"]
     sx, sy = a._answer_scale({"image_grid_thw": None}, Image.new("RGB", (1280, 720)))
     got, _, lbl, _ = a._parse('[{"bbox_2d": [500, 500, 1000, 1000], "label": "car"}]', CLASSES, sx, sy)
